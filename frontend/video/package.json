@@ -1,0 +1,25 @@
+{
+  "name": "paper-video-renderer",
+  "version": "1.0.0",
+  "description": "Remotion video renderer for research papers",
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion render Root PaperVideo out/video.mp4",
+    "render": "remotion render"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.373",
+    "@remotion/google-fonts": "^4.0.373",
+    "@remotion/paths": "^4.0.373",
+    "@remotion/shapes": "^4.0.373",
+    "framer-motion": "^12.23.24",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "remotion": "^4.0.373"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.6.0"
+  }
+}

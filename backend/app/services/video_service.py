@@ -1,11 +1,10 @@
-import subprocess
+import asyncio  # <-- Import asyncio
 import os
 from pathlib import Path
 from fastapi import HTTPException
 from ..config import get_settings
 
 settings = get_settings()
-
 
 class VideoService:
     def __init__(self):
@@ -15,7 +14,7 @@ class VideoService:
     
     async def render_video(self, script_id: str) -> str:
         """
-        Render video using Remotion CLI.
+        Render video using Remotion CLI asynchronously.
         Returns the URL to the rendered video.
         """
         # Check if props file exists
@@ -30,50 +29,56 @@ class VideoService:
         video_filename = f"{script_id}.mp4"
         output_path = self.videos_dir / video_filename
         
+        # Get absolute paths for the command
+        remotion_project_dir = str(settings.remotion_project_path.absolute())
+        props_file_path = str(props_path.absolute())
+        output_file_path = str(output_path.absolute())
+
         # Build Remotion render command
-        command = [
-            "npx",
-            "remotion",
-            "render",
-            "src/Root.tsx",
-            "PaperVideo",
-            str(output_path.absolute()),
-            f"--props={str(props_path.absolute())}",
-            "--overwrite"
-        ]
+        # "PaperVideo" is your Composition ID from your frontend code
+        command = (
+            f"cd {remotion_project_dir} && "
+            f"npx remotion render PaperVideo "
+            f"{output_file_path} "
+            f"--props={props_file_path} "
+            f"--overwrite --log=verbose"
+        )
         
+        print(f"Starting async render for {script_id}...")
+        print(f"Command: {command}")
+
         try:
-            # Run Remotion from its project directory
-            result = subprocess.run(
+            # Run Remotion asynchronously
+            process = await asyncio.create_subprocess_shell(
                 command,
-                cwd=str(settings.remotion_project_path.absolute()),
-                capture_output=True,
-                text=True,
-                check=True
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
             
-            print(f"Remotion output: {result.stdout}")
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                print(f"Remotion rendering failed:")
+                print(f"STDOUT: {stdout.decode()}")
+                print(f"STDERR: {stderr.decode()}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Video rendering failed: {stderr.decode()}"
+                )
             
             if not output_path.exists():
-                raise Exception("Video file was not created")
+                raise Exception("Video file was not created by Remotion, despite no error.")
             
-            # Return URL
+            print(f"Remotion output: {stdout.decode()}")
+            
+            # Return URL (works because of your app.mount in main.py)
             return f"http://localhost:{settings.backend_port}/videos/{video_filename}"
             
-        except subprocess.CalledProcessError as e:
-            print(f"Remotion rendering failed:")
-            print(f"STDOUT: {e.stdout}")
-            print(f"STDERR: {e.stderr}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Video rendering failed: {e.stderr}"
-            )
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail=f"Unexpected error during rendering: {str(e)}"
             )
-
 
 # Singleton instance
 video_service = VideoService()

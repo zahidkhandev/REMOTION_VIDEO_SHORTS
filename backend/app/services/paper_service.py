@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 from fastapi import UploadFile, HTTPException
-from ..schemas.video import VideoScript, Scene
+from ..schemas.video import VideoScript, Scene  # Make sure Scene is imported
 from ..core.gemini import gemini_analyzer
 from ..core.tts import tts_generator
 from ..core.pdf import pdf_extractor
@@ -57,7 +57,14 @@ class PaperService:
         gemini_response = await gemini_analyzer.analyze_paper(paper_text, target_duration)
         
         # Step 3: Generate TTS for each scene (or skip if disabled)
-        video_script = VideoScript(script_id=script_id, scenes=[])
+        # Use the total_duration_seconds from Gemini's response
+        video_script = VideoScript(
+            script_id=script_id, 
+            scenes=[],
+            total_duration_seconds=gemini_response.get("total_duration_seconds", target_duration)
+        )
+        
+        total_calculated_duration = 0.0
         
         for i, scene_data in enumerate(gemini_response.get("scenes", [])):
             try:
@@ -66,9 +73,8 @@ class PaperService:
                 if skip_tts or not settings.enable_tts:
                     # Skip TTS generation
                     audio_path = ""
-                    # Estimate duration based on narration length
-                    words = len(scene_data["narration"].split())
-                    duration_sec = max(2.0, words / 2.5)
+                    # Use the duration from Gemini instead of estimating
+                    duration_sec = scene_data.get("duration_in_seconds", max(2.0, len(scene_data["narration"].split()) / 2.5))
                 else:
                     # Get TTS prompt for this visual type
                     tts_prompt = TTS_PROMPTS.get(visual_type, TTS_PROMPTS["explainer"])
@@ -91,21 +97,29 @@ class PaperService:
                     visual=visual_type,
                     audio_path=audio_path,
                     duration_in_seconds=duration_sec,
-                    sound_effect=sound_effect
+                    sound_effect=sound_effect,
+                    # --- THIS IS THE FIX ---
+                    # You MUST pass the visuals data from Gemini
+                    visuals=scene_data["visuals"]
+                    # ----------------------
                 )
                 
                 video_script.scenes.append(scene)
-                video_script.total_duration_seconds += duration_sec
+                total_calculated_duration += duration_sec
                 
             except Exception as e:
                 print(f"Failed to process scene {i}: {e}")
-                continue
+                # This could be a validation error if 'visuals' is missing
+                raise HTTPException(status_code=500, detail=f"Error processing scene {i}: {e}")
         
         if not video_script.scenes:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to generate any scenes. Please try again."
             )
+        
+        # Update the total duration with the real, calculated sum
+        video_script.total_duration_seconds = total_calculated_duration
         
         # Step 4: Save props JSON
         props_path = self.props_dir / f"{script_id}.json"
@@ -115,7 +129,6 @@ class PaperService:
         )
         
         return video_script
-
 
 # Singleton instance
 paper_service = PaperService()

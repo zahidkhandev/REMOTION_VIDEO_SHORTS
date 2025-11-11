@@ -1,53 +1,60 @@
-from pydantic import BaseModel, Field
-from typing import List, Literal
+from pydantic import BaseModel
+from typing import Literal, Optional, List
+
+
+class SVGElement(BaseModel):
+    """AI-generated SVG element"""
+    type: Literal["path", "circle", "rect", "line", "text", "equation"]
+    data: str  # SVG path data, radius, dimensions, or text content
+    x: float
+    y: float
+    color: str
+    stroke_width: float = 3
+    animation: Literal["draw", "fade", "scale", "morph", "pulse"] = "draw"
+    delay: float = 0  # Animation delay in frames
+
+
+class SceneVisuals(BaseModel):
+    """Complete visual description for a scene"""
+    svg_elements: List[SVGElement]
+    background_color: str = "#0a0e27"
+    particles: bool = False
+    grid: bool = True
 
 
 class Scene(BaseModel):
-    title: str = Field(..., description="Scene title or key point")
-    narration: str = Field(..., description="Narration text for TTS")
+    title: str
+    narration: str
     visual: Literal[
-        "title_card", 
-        "explainer", 
-        "key_point", 
-        "quote", 
+        "title_card",
+        "explainer",
+        "key_point",
+        "quote",
         "statistic",
         "comparison",
         "timeline",
         "conclusion"
-    ] = Field(..., description="Visual style hint for Remotion")
-    audio_path: str | None = Field(None, description="Relative path to audio file")
-    duration_in_seconds: float = Field(0.0, description="Audio duration")
-    sound_effect: str = Field("soft_ambient", description="Sound effect type for Remotion")
+    ]
+    audio_path: Optional[str] = None
+    duration_in_seconds: float
+    sound_effect: str
+    visuals: SceneVisuals  # NEW: AI-generated SVG scene
 
 
 class VideoScript(BaseModel):
     script_id: str
     scenes: List[Scene]
-    total_duration_seconds: float = 0.0
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "script_id": "sample_paper",
-                "scenes": [
-                    {
-                        "title": "Revolutionary AI Discovery",
-                        "narration": "Scientists have unveiled a breakthrough.",
-                        "visual": "title_card",
-                        "audio_path": "",
-                        "duration_in_seconds": 3.5,
-                        "sound_effect": "whoosh_impact"
-                    }
-                ],
-                "total_duration_seconds": 3.5
-            }
-        }
+    total_duration_seconds: float
 
+
+# --- FIX: ADD THESE MISSING MODELS ---
 
 class RenderRequest(BaseModel):
+    """Request body for the /video/render endpoint"""
     script_id: str
 
 
 class RenderResponse(BaseModel):
+    """Response body for the /video/render endpoint"""
     video_url: str
     script_id: str
