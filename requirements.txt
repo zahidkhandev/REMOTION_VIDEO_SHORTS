@@ -1,0 +1,20 @@
+# FastAPI
+fastapi[standard]
+uvicorn[standard]
+python-multipart
+
+# Google AI
+google-generativeai
+google-cloud-texttospeech
+
+# PDF Processing
+PyMuPDF
+
+# Audio Processing
+mutagen
+
+# Utilities
+python-dotenv
+pydantic
+pydantic-settings
+aiofiles

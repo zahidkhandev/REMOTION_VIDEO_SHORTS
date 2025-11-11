@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environment
+.env
+gcp-credentials.json
+
+# Storage
+backend/storage/audio/*
+backend/storage/props/*
+backend/storage/videos/*
+!backend/storage/**/.gitkeep
+
+# Remotion
+frontend/video/node_modules/
+frontend/video/public/audio/*
+frontend/video/dist/
+frontend/video/.remotion/
+
+# UI
+frontend/ui/node_modules/
+frontend/ui/dist/
+frontend/ui/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
