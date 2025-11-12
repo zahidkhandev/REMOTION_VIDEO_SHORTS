@@ -18,3 +18,5 @@ python-dotenv
 pydantic
 pydantic-settings
 aiofiles
+
+openai-whisper

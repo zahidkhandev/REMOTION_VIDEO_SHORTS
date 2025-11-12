@@ -1,10 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal, Optional, List
 
 
 class SVGElement(BaseModel):
     """AI-generated SVG element"""
-    type: Literal["path", "circle", "rect", "line", "text", "equation"]
+    type: str
     data: str  # SVG path data, radius, dimensions, or text content
     x: float
     y: float
@@ -23,31 +23,22 @@ class SceneVisuals(BaseModel):
 
 
 class Scene(BaseModel):
+    """A single scene in the generated video script"""
     title: str
     narration: str
-    visual: Literal[
-        "title_card",
-        "explainer",
-        "key_point",
-        "quote",
-        "statistic",
-        "comparison",
-        "timeline",
-        "conclusion"
-    ]
+    visual: str
     audio_path: Optional[str] = None
     duration_in_seconds: float
-    sound_effect: str
-    visuals: SceneVisuals  # NEW: AI-generated SVG scene
+    sound_effect: str = Field(..., description="Sound effect identifier from Gemini or fallback")  # ✅ required
+    visuals: SceneVisuals  # AI-generated SVG scene visuals
 
 
 class VideoScript(BaseModel):
+    """Full generated video script"""
     script_id: str
     scenes: List[Scene]
     total_duration_seconds: float
 
-
-# --- FIX: ADD THESE MISSING MODELS ---
 
 class RenderRequest(BaseModel):
     """Request body for the /video/render endpoint"""

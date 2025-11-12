@@ -1,7 +1,6 @@
 from typing import Dict
 from fastapi import HTTPException
 import json
-import yaml
 from pathlib import Path
 import google.generativeai as genai
 from ..config import get_settings
@@ -16,205 +15,192 @@ class GeminiAnalyzer:
     def __init__(self):
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set in environment")
+
+        print("Initializing GeminiAnalyzer...")
         self.model = genai.GenerativeModel(settings.gemini_model)
-        
-        prompt_path = Path(__file__).parent.parent / "prompts" / "video_script_notebooklm.yaml"
-        
+        print(f"Using Gemini Model: {settings.gemini_model}")
+
+        # Load the prompt template (.md file)
+        prompt_path = Path(__file__).parent.parent / "prompts" / "video_script_generation.md"
         if not prompt_path.exists():
-            print("Warning: NotebookLM YAML not found, trying default...")
-            prompt_path = Path(__file__).parent.parent / "prompts" / "video_script_generation.yaml"
-        
-        # This still requires you to fix the indentation error in the YAML file itself.
-        # The parser will fail here if the YAML is invalid.
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            self.config = yaml.safe_load(f)
-            print(f"Loaded prompt config from {prompt_path.name}")
-    
-    def _build_prompt_from_yaml(self, paper_text: str, duration_seconds: int) -> str:
-        cfg = self.config
-        
-        prompt = f"""{cfg['system_role']}
+            print(f"FATAL ERROR: Prompt template file not found at {prompt_path}")
+            raise FileNotFoundError(f"Prompt template file not found: {prompt_path}")
 
-{cfg['mission'].format(duration_seconds=duration_seconds)}
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            self.prompt_template = f.read()
+            print(f"Loaded prompt template from {prompt_path.name} ({len(self.prompt_template)} chars)")
 
----
+    def _build_prompt(self, paper_text: str, duration_seconds: int) -> str:
+        """
+        Builds the final Gemini prompt string from the .md template.
+        """
+        print(f"Building prompt for {duration_seconds}s video...")
 
-## TIMING REQUIREMENTS
+        # Substitute duration
+        prompt = self.prompt_template.replace("{duration_seconds}", str(duration_seconds))
 
-"""
-        for key, value in cfg['timing_requirements'].items():
-            if isinstance(value, dict):
-                prompt += f"**{key.replace('_', ' ').title()}:**\n"
-                for k, v in value.items():
-                    prompt += f"  - {k}: {v}\n"
-            else:
-                prompt += f"- {key}: {value.format(duration_seconds=duration_seconds)}\n"
-        
-        prompt += "\n---\n\n## NARRATION GUIDELINES\n\n"
-        
-        # FIX 1: Changed 'style' to 'overall_approach'
-        prompt += f"{cfg['narration_guidelines']['overall_approach']}\n\n"
-        prompt += f"**Word count:** {cfg['narration_guidelines']['word_count']}\n"
-        
-        # FIX 2: Changed 'tone' to 'tone_examples' and formatted it
-        prompt += f"**Tone:**\n"
-        if 'tone_examples' in cfg['narration_guidelines'] and 'good_tone' in cfg['narration_guidelines']['tone_examples']:
-            for tone in cfg['narration_guidelines']['tone_examples']['good_tone']:
-                prompt += f"- {tone}\n"
-        prompt += "\n"
-        
-        prompt += "**AVOID:**\n"
-        # FIX 3: Changed 'avoid_phrases' to 'forbidden_phrases' and looped through sub-keys
-        if 'forbidden_phrases' in cfg['narration_guidelines']:
-            for phrase_type, phrases in cfg['narration_guidelines']['forbidden_phrases'].items():
-                if isinstance(phrases, list):
-                    for phrase in phrases:
-                        prompt += f"- {phrase}\n"
-        
-        prompt += "\n**PREFER:**\n"
-        # FIX 4: Changed 'prefer_phrases' to 'preferred_phrases' and looped through sub-keys
-        if 'preferred_phrases' in cfg['narration_guidelines']:
-            for phrase_type, phrases in cfg['narration_guidelines']['preferred_phrases'].items():
-                if isinstance(phrases, list):
-                    for phrase in phrases:
-                        prompt += f"- {phrase}\n"
-        
-        prompt += "\n---\n\n## VISUAL PATTERNS\n\n"
-        prompt += "Use a DIFFERENT pattern for EACH scene:\n\n"
-        
-        for pattern_key, pattern in cfg['visual_patterns'].items():
-            prompt += f"**{pattern['name']}:** {pattern['description']}\n"
-            if 'best_for' in pattern and isinstance(pattern['best_for'], list):
-                prompt += f"  Best for: {', '.join(pattern['best_for'])}\n\n"
-        
-        prompt += "\n---\n\n## SVG ELEMENT TYPES\n\n"
-        
-        for elem_type, elem_info in cfg['svg_element_library'].items():
-            prompt += f"### {elem_type.upper()}\n"
-            if 'description' in elem_info:
-                prompt += f"{elem_info['description']}\n"
-            
-            # FIX 5 (A): Check for 'data_format' and 'type' inside it
-            if 'data_format' in elem_info and 'type' in elem_info['data_format']:
-                prompt += f"**Data format:** {elem_info['data_format']['type']}\n"
+        allowed_sound_effects = {
+            "soft_swoosh",
+            "quick_whoosh",
+            "slide_in",
+            "pop_in",
+            "gentle_transition",
+            "digital_pulse",
+            "cyber_click",
+            "circuit_buzz",
+            "data_stream",
+            "success_chime",
+            "completion_bell",
+            "achievement_ding",
+            "notification_subtle",
+            "spark_zap",
+            "bubble_pop",
+        }
 
-            # FIX 5 (B): Check for 'data_format' and 'examples' inside it, then join .values()
-            if 'data_format' in elem_info and 'examples' in elem_info['data_format']:
-                # Check if 'examples' is a dictionary before calling .values()
-                if isinstance(elem_info['data_format']['examples'], dict):
-                    example_str = ", ".join(elem_info['data_format']['examples'].values())
-                    prompt += f"**Examples:** {example_str}\n"
-            
-            if 'code_example' in elem_info:
-                 prompt += f"**Example:**\n```json\n{elem_info['code_example'].strip()}\n```\n\n"
-
-        
-        prompt += "\n---\n\n## COLOR PALETTE\n\n"
-        
-        for color_key, color_info in cfg['color_palette'].items():
-            if isinstance(color_info, dict) and 'hex' in color_info:
-                prompt += f"**{color_info['name']}** (`{color_info['hex']}`)\n"
-                if 'usage' in color_info:
-                    prompt += f"  Usage: {color_info['usage']}\n\n"
-        
-        prompt += "\n---\n\n## REQUIRED OUTPUT\n\n"
-        prompt += "Return ONLY valid JSON following this schema:\n\n"
-        
-        # FIX 6: Dump the json_schema from config, not an empty string
-        if 'json_schema' in cfg:
-            prompt += f"```json\n{json.dumps(cfg['json_schema'], indent=2)}\n```\n\n"
-        else:
-            prompt += "```json\n{...}\n```\n\n"
-
-        
-        prompt += "\n---\n\n## STRICT REQUIREMENTS\n\n"
-        
-        if 'strict_requirements' in cfg:
-            for req in cfg['strict_requirements']:
-                prompt += f"- {req.format(duration_seconds=duration_seconds)}\n"
-        
-        prompt += f"\n---\n\n## PAPER CONTENT\n\n{paper_text}\n\n"
+        # Append paper content + instructions
+        prompt += f"\n\n---\n\n## PAPER CONTENT\n\n{paper_text}\n\n"
         prompt += "---\n\n"
         prompt += "CREATE THE VIDEO SCRIPT NOW!\n\n"
         prompt += "Return ONLY valid JSON. NO markdown, NO explanations, JUST the JSON.\n"
-        
+        prompt += f"{allowed_sound_effects}"
+
+        print("Prompt building complete.")
         return prompt
-    
+
     async def analyze_paper(self, paper_text: str, duration_seconds: int = 60) -> Dict:
+        print(f"\n--- New Analysis Request Received ---")
+        print(f"Duration: {duration_seconds}s, Paper Text Length: {len(paper_text)} chars")
+
         if len(paper_text) > 500000:
             paper_text = paper_text[:500000]
             print("Warning: Paper truncated to 500k chars")
-        
-        prompt = self._build_prompt_from_yaml(paper_text, duration_seconds)
-        
-        print(f"Generated prompt: {len(prompt)} chars")
-        
+
+        prompt = self._build_prompt(paper_text, duration_seconds)
+        print(f"Final prompt length: {len(prompt)} chars")
+
         try:
+            print("Sending prompt to Gemini API... (This may take a while)")
             response = self.model.generate_content(prompt)
-            json_str = response.text.strip()
-            
-            # --- START FIX ---
-            # Robustly find the JSON object within the response text,
-            # ignoring markdown fences or other explanatory text.
-            start_index = json_str.find('{')
-            end_index = json_str.rfind('}')
-            
-            if start_index != -1 and end_index != -1 and end_index > start_index:
-                json_str = json_str[start_index : end_index + 1]
+            print("Gemini response received.")
+
+            # Token usage logging
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                print(f"Gemini Token Usage: {response.usage_metadata}")
             else:
-                # If no {} found, parsing will fail, raise an error
+                print("Gemini Token Usage: Not available in response.")
+
+            json_str = response.text.strip()
+            print(f"Raw response text (first 500 chars): {json_str[:500]}...")
+
+            # Robustly extract JSON object
+            print("Robustly finding JSON in response text...")
+            start_index = json_str.find("{")
+            end_index = json_str.rfind("}")
+
+            if start_index != -1 and end_index != -1 and end_index > start_index:
+                json_str = json_str[start_index:end_index + 1]
+                print(f"Found JSON object boundaries from index {start_index} to {end_index}.")
+            else:
+                print("FATAL ERROR: No valid JSON object '{...}' found in response.")
                 raise ValueError("No valid JSON object found in response.")
-            # --- END FIX ---
-            
+
+            print("Parsing JSON string...")
             data = json.loads(json_str)
-            
+            print("JSON parsing successful.")
+
             if "scenes" not in data or not isinstance(data["scenes"], list):
+                print("FATAL ERROR: Invalid response, 'scenes' array is missing or not a list.")
                 raise ValueError("Invalid response: missing 'scenes' array")
-            
-            if len(data["scenes"]) < 8:
-                print(f"Warning: Only {len(data['scenes'])} scenes generated, expected 8+")
-            
+
+            scene_count = len(data["scenes"])
+            print(f"Found {scene_count} scenes. Validating each one...")
+
+            if scene_count < 8:
+                print(f"Warning: Only {scene_count} scenes generated, expected 8+")
+
+            # ✅ Fixed sound effect validation (robust normalization)
+            valid_effects = {
+                "soft_swoosh",
+                "quick_whoosh",
+                "slide_in",
+                "pop_in",
+                "gentle_transition",
+                "digital_pulse",
+                "cyber_click",
+                "circuit_buzz",
+                "data_stream",
+                "success_chime",
+                "completion_bell",
+                "achievement_ding",
+                "notification_subtle",
+                "spark_zap",
+                "bubble_pop",
+            }
+
             for i, scene in enumerate(data["scenes"]):
-                required = ["title", "narration", "visual", "visuals"]
-                for field in required:
+                print(f"  Validating scene {i+1}/{scene_count} (Title: {scene.get('title', 'N/A')})...")
+
+                required_fields = ["title", "narration", "visual", "visuals"]
+                for field in required_fields:
                     if field not in scene:
+                        print(f"    ERROR: Scene {i} missing required field: {field}")
                         raise ValueError(f"Scene {i} missing required field: {field}")
-                
+
                 if "svg_elements" not in scene["visuals"]:
+                    print(f"    ERROR: Scene {i} missing 'visuals.svg_elements'")
                     raise ValueError(f"Scene {i} missing svg_elements")
-                
-                # This warning is subjective, can be adjusted
-                if len(scene["visuals"]["svg_elements"]) < 1:
-                    print(f"Warning: Scene {i} has 0 svg_elements")
-                
-                if "sound_effect" not in scene:
-                    scene["sound_effect"] = "soft_ambient"
-                
+
+                svg_count = len(scene["visuals"]["svg_elements"])
+                if svg_count < 1:
+                    print(f"    Warning: Scene {i} has 0 svg_elements")
+
+                # --- Fixed normalization here ---
+                se = (scene.get("sound_effect") or "").strip().lower().replace("-", "_")
+
+                if se not in valid_effects:
+                    print(f" ⚠️ Scene {i} has invalid or missing sound_effect '{scene.get('sound_effect')}', defaulting to 'soft_swoosh'")
+                    se = "soft_swoosh"
+
+                scene["sound_effect"] = se
+                # --------------------------------
+
+                # Ensure visuals contain defaults
                 if "background_color" not in scene["visuals"]:
-                    scene["visuals"]["background_color"] = self.config['color_palette']['background']['hex']
-                
+                    scene["visuals"]["background_color"] = "#0a0e27"
                 if "grid" not in scene["visuals"]:
                     scene["visuals"]["grid"] = False
                 if "particles" not in scene["visuals"]:
                     scene["visuals"]["particles"] = False
-            
+
+                print(f"  Scene {i+1} OK ({svg_count} SVG elements, sound: {se}).")
+
+            print("✅ All scenes validated successfully.")
+
+            # Summary
             print(f"Generated {len(data['scenes'])} scenes with custom SVG visuals")
             print(f"Total duration: {data.get('total_duration_seconds', 'unknown')}s")
-            
+
             total_elements = sum(len(scene["visuals"]["svg_elements"]) for scene in data["scenes"])
             print(f"Total SVG elements: {total_elements}")
             if data["scenes"]:
                 print(f"Avg elements per scene: {total_elements / len(data['scenes']):.1f}")
-            
+
+            # ✅ Log final sound effect usage summary
+            from collections import Counter
+            print("Sound effect distribution:", Counter(scene["sound_effect"] for scene in data["scenes"]))
+
+            print("Analysis complete. Returning data.")
+            print("--- Analysis Request Finished ---")
+
             return data
-            
+
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
-            print(f"Raw response (first 1000 chars):\n{response.text[:1000]}")
+            print(f"FATAL ERROR: JSON parse error: {e}")
+            print(f"Raw response (first 1000 chars):\n{json_str[:1000]}")
             raise HTTPException(status_code=500, detail=f"Invalid JSON from Gemini: {str(e)}")
+
         except Exception as e:
-            print(f"Gemini error: {e}")
-            # Propagate the original error message for better debugging
+            print(f"FATAL ERROR: An unexpected error occurred: {e}")
             raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 

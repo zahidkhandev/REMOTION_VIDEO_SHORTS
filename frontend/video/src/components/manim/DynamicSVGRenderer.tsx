@@ -2,20 +2,44 @@ import React from "react";
 import { spring, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import type { SVGElement } from "../../types";
 import { MANIM_FONT } from "./ManimBackground";
+import { LucideIconRenderer } from "./LucideIconRenderer"; // <-- 1. IMPORT NEW COMPONENT
 
 interface Props {
   element: SVGElement;
 }
 
+// A new hook to measure the size of an SVG <text> element
+function useMeasure() {
+  const [box, setBox] = React.useState<SVGRect | null>(null);
+  const ref = React.useCallback((node: SVGTextElement | null) => {
+    if (node) {
+      requestAnimationFrame(() => {
+        setBox(node.getBBox());
+      });
+    }
+  }, []);
+  return [box, ref] as const;
+}
+
 export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const [box, textRef] = useMeasure();
 
   const progress = spring({
     frame: frame - element.delay,
     fps,
     config: { damping: 100 },
   });
+
+  // --- *** NEW LUCIDE ICON LOGIC *** ---
+  // 2. ADD THIS BLOCK
+  if (element.type === "lucide_icon") {
+    // We pass the whole element down to the new renderer,
+    // which will handle parsing the data and all animations.
+    return <LucideIconRenderer element={element} />;
+  }
+  // --- *** END NEW LOGIC *** ---
 
   // CIRCLE
   if (element.type === "circle") {
@@ -71,6 +95,7 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
       );
     }
 
+    // Default/Fade animation
     return (
       <circle
         cx={element.x}
@@ -92,7 +117,6 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
 
     if (element.animation === "draw") {
       const dashOffset = perimeter * (1 - progress);
-
       return (
         <rect
           x={element.x - width / 2}
@@ -105,10 +129,11 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
           strokeDasharray={perimeter}
           strokeDashoffset={dashOffset}
           filter={`drop-shadow(0 0 10px ${element.color})`}
+          rx={8}
+          ry={8}
         />
       );
     }
-
     if (element.animation === "scale") {
       return (
         <rect
@@ -121,10 +146,12 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
           strokeWidth={element.stroke_width}
           opacity={progress}
           filter={`drop-shadow(0 0 10px ${element.color})`}
+          rx={8}
+          ry={8}
         />
       );
     }
-
+    // Default/Fade
     return (
       <rect
         x={element.x - width / 2}
@@ -136,6 +163,8 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
         strokeWidth={element.stroke_width}
         opacity={progress}
         filter={`drop-shadow(0 0 10px ${element.color})`}
+        rx={8}
+        ry={8}
       />
     );
   }
@@ -162,6 +191,7 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
       );
     }
 
+    // Default/Fade animation
     return (
       <line
         x1={element.x}
@@ -179,35 +209,33 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
 
   // PATH
   if (element.type === "path") {
-    // --- START FIX: Dynamic Path Length ---
     const pathRef = React.useRef<SVGPathElement>(null);
     const [pathLength, setPathLength] = React.useState(0);
 
     React.useEffect(() => {
       if (pathRef.current) {
-        // Measure the true length of the SVG path
         setPathLength(pathRef.current.getTotalLength());
       }
-    }, [element.data]); // Re-measure if the path data ever changes
+    }, [element.data]);
 
     if (element.animation === "draw") {
-      // Use the DYNAMIC pathLength from state
       const dashOffset = pathLength * (1 - progress);
 
       return (
         <path
-          ref={pathRef} // Add the ref here
+          ref={pathRef}
           d={element.data}
           fill="none"
           stroke={element.color}
           strokeWidth={element.stroke_width}
-          strokeDasharray={pathLength} // Use the state variable
-          strokeDashoffset={dashOffset} // Use the calculated offset
+          strokeDasharray={pathLength}
+          strokeDashoffset={dashOffset}
           filter={`drop-shadow(0 0 10px ${element.color})`}
         />
       );
     }
 
+    // Default/Fade animation
     return (
       <path
         d={element.data}
@@ -222,21 +250,40 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
 
   // TEXT
   if (element.type === "text") {
-    const y = interpolate(progress, [0, 1], [element.y + 20, element.y]);
+    const hasBox = element.stroke_width > 0;
+    const groupOpacity = progress;
+    const textY = interpolate(progress, [0, 1], [element.y + 20, element.y]);
 
     return (
-      <text
-        x={element.x}
-        y={y}
-        fill={element.color}
-        fontSize={32}
-        fontFamily={MANIM_FONT}
-        textAnchor="middle"
-        opacity={progress}
-        filter="drop-shadow(0 2px 4px rgba(0,0,0,0.5))"
-      >
-        {element.data}
-      </text>
+      <g opacity={groupOpacity}>
+        {hasBox && box && (
+          <rect
+            x={box.x - 30}
+            y={box.y - 30}
+            width={box.width + 60}
+            height={box.height + 60}
+            fill="none"
+            stroke={element.color}
+            strokeWidth={element.stroke_width}
+            filter={`drop-shadow(0 0 10px ${element.color})`}
+            rx={8}
+            ry={8}
+          />
+        )}
+        <text
+          ref={textRef}
+          x={element.x}
+          y={textY}
+          fill={hasBox ? element.color : "#FFFFFF"}
+          fontSize={32}
+          fontFamily={MANIM_FONT}
+          textAnchor="middle"
+          dominantBaseline="central"
+          filter="drop-shadow(0 2px 4px rgba(0,0,0,0.5))"
+        >
+          {element.data}
+        </text>
+      </g>
     );
   }
 
@@ -253,6 +300,7 @@ export const DynamicSVGRenderer: React.FC<Props> = ({ element }) => {
         fontFamily={MANIM_FONT}
         fontWeight={700}
         textAnchor="middle"
+        dominantBaseline="central"
         opacity={progress}
         filter={`drop-shadow(0 0 15px ${element.color})`}
       >
